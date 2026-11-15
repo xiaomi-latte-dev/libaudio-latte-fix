@@ -1,0 +1,38 @@
+--- a/hal/audio_hw.c
++++ b/hal/audio_hw.c
+@@ -53,6 +53,11 @@
+ #define OUT_LONG_PERIOD_COUNT 8
+ #define OUT_SAMPLING_RATE 48000
+ 
++/* Start playback only with ~7 periods queued so a (re)start carries ~75ms
++ * of audio instead of racing the DMA drain with a single ~21ms batch
++ * (observed AF write jitter: avg 29ms, max 45ms). */
++#define OUT_START_THRESHOLD_PERIODS (OUT_LONG_PERIOD_COUNT - 1)
++
+ #define IN_PERIOD_SIZE 1024
+ #define IN_PERIOD_COUNT 4
+ #define IN_SAMPLING_RATE 48000
+@@ -78,7 +83,7 @@
+     .period_size = OUT_PERIOD_SIZE,
+     .period_count = OUT_LONG_PERIOD_COUNT,
+     .format = PCM_FORMAT_S16_LE,
+-    .start_threshold = OUT_PERIOD_SIZE * OUT_SHORT_PERIOD_COUNT,
++    .start_threshold = OUT_PERIOD_SIZE * OUT_START_THRESHOLD_PERIODS,
+ };
+ 
+ struct pcm_config pcm_config_in = {
+@@ -1010,8 +1015,12 @@
+         }
+         out->standby = false;
+     }
+-    buffer_type = (adev->screen_off && !adev->active_in) ?
+-            OUT_BUFFER_TYPE_LONG : OUT_BUFFER_TYPE_SHORT;
++    /* Keep the kernel buffer topped up regardless of screen state: the
++     * SHORT (2-period) threshold paces AF writes to a ~22ms fill level,
++     * smaller than the observed HAL write jitter (avg 29ms, max 45ms), so
++     * every jitter spike underruns the stream. The LONG (8-period)
++     * threshold keeps ~88ms of headroom instead. */
++    buffer_type = OUT_BUFFER_TYPE_LONG;
+     sco_on = (adev->out_device & AUDIO_DEVICE_OUT_ALL_SCO);
+     pthread_mutex_unlock(&adev->lock);
+ 

@@ -1,0 +1,41 @@
+--- a/hal/audio_hw.c
++++ b/hal/audio_hw.c
+@@ -1130,10 +1130,35 @@
+         ret = pcm_write(out->pcm, in_buffer, out_frames * frame_size);
+     }
+     if (ret == -EPIPE) {
+-        /* In case of underrun, don't sleep since we want to catch up asap */
++        /* Underrun: PCM_NORESTART leaves the stream in XRUN until it is
++         * prepared again. Prepare and rewrite once; if that still fails,
++         * tear the PCM down and bring it back up so the stream recovers
++         * instead of returning -EPIPE until the next standby. */
++        ALOGW("out_write underrun: %d, recovering", ret);
++        ret = pcm_prepare(out->pcm);
++        if (ret == 0)
++            ret = pcm_write(out->pcm, in_buffer, out_frames * frame_size);
++        if (ret != 0) {
++            ALOGW("out_write rewrite failed (%d), reopening pcm", ret);
++            pthread_mutex_lock(&adev->lock);
++            do_out_standby(out);
++            ret = start_output_stream(out);
++            pthread_mutex_unlock(&adev->lock);
++            if (ret == 0) {
++                out->standby = false;
++                /* in_buffer may have pointed into the old out->buffer
++                 * (resampler path); drop this chunk, the next write
++                 * goes through the fresh pcm normally */
++                ALOGW("out_write pcm reopened, dropping current chunk");
++                ret = 0;
++            }
++        }
+         pthread_mutex_unlock(&out->lock);
+-        ALOGW("out_write underrun: %d", ret);
+-        return ret;
++        if (ret != 0) {
++            ALOGW("out_write recovery failed: %d", ret);
++            return ret;
++        }
++        return bytes;
+     }
+ 
+ exit:

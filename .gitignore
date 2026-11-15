@@ -1,0 +1,11 @@
+# Build artifacts
+out/
+
+# Sources fetched by build.sh (pinned by commit inside the script)
+source/
+
+# Link libs extracted from system images by build.sh
+deps/
+
+# Transient device script from deploy.sh
+.deploy-device.sh
